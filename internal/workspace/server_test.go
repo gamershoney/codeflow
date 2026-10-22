@@ -2,15 +2,18 @@ package workspace
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestProjectAPIAndMCPDiscovery(t *testing.T) {
+func TestProjectAPIAndOfficialMCPDiscovery(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "project.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -24,41 +27,115 @@ func TestProjectAPIAndMCPDiscovery(t *testing.T) {
 		t.Fatalf("project response: %d %s", projectRes.Code, projectRes.Body.String())
 	}
 
-	rpc := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
-	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(rpc))
-	mcpReq.Header.Set("Content-Type", "application/json")
-	mcpRes := httptest.NewRecorder()
-	server.ServeHTTP(mcpRes, mcpReq)
-	if mcpRes.Code != http.StatusOK || !strings.Contains(mcpRes.Body.String(), "propose_architecture_change") {
-		t.Fatalf("MCP response: %d %s", mcpRes.Code, mcpRes.Body.String())
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	session := connectMCP(t, httpServer.URL+"/mcp", "")
+	defer session.Close()
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(tools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
+		t.Fatal("write-capable MCP tool was not discovered")
+	}
+	resource, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: graphResourceURI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resource.Contents) != 1 || !strings.Contains(resource.Contents[0].Text, "cmp_backend") {
+		t.Fatal("canonical graph resource was not readable")
 	}
 }
 
-func TestMCPProposalIsReviewGated(t *testing.T) {
+func TestOfficialMCPProposalIsReviewGated(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "project.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(store, filepath.Join(t.TempDir(), "dist"))
+	httpServer := httptest.NewServer(NewServer(store, filepath.Join(t.TempDir(), "dist")))
+	defer httpServer.Close()
+	session := connectMCP(t, httpServer.URL+"/mcp", "")
+	defer session.Close()
 	before := store.Snapshot()
-	arguments := Proposal{
-		ID: "prop_mcp_test", Title: "Add audit service", BaseRevision: before.Revision,
-		Operations: []Operation{{Kind: "add_component", Component: &Component{ID: "cmp_audit", Type: "service", Title: "Audit service", ParentID: "cmp_platform", Provenance: Provenance{Kind: "inferred", Author: "test", Confidence: .8}}}},
+	input := proposeArchitectureInput{
+		ID: "prop_mcp_test", Title: "Add audit service", Summary: "Centralize immutable security events", Author: "integration-test", BaseRevision: before.Revision,
+		Operations: []Operation{{Kind: "add_component", Component: &Component{ID: "cmp_audit", Type: "service", Title: "Audit service", ParentID: "cmp_platform", Provenance: Provenance{Kind: "inferred", Author: "integration-test", Confidence: .8}}}},
 	}
-	args, _ := json.Marshal(arguments)
-	params, _ := json.Marshal(map[string]any{"name": "propose_architecture_change", "arguments": json.RawMessage(args)})
-	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": json.RawMessage(params)})
-	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
-	res := httptest.NewRecorder()
-	server.ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "pending") {
-		t.Fatalf("proposal response: %d %s", res.Code, res.Body.String())
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "propose_architecture_change", Arguments: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("proposal tool returned an error: %#v", result.Content)
 	}
 	after := store.Snapshot()
 	if componentExists(&after, "cmp_audit") {
 		t.Fatal("MCP proposal mutated authoritative graph before review")
 	}
-	if len(after.Proposals) != len(before.Proposals)+1 {
+	if len(after.Proposals) != len(before.Proposals)+1 || after.Proposals[0].ID != input.ID {
 		t.Fatal("proposal was not recorded")
 	}
+}
+
+func TestMCPBearerScopes(t *testing.T) {
+	t.Setenv("CODEFLOW_MCP_READ_TOKEN", "reader-secret")
+	t.Setenv("CODEFLOW_MCP_WRITE_TOKEN", "writer-secret")
+	store, _ := NewStore(filepath.Join(t.TempDir(), "project.json"))
+	server := NewServer(store, filepath.Join(t.TempDir(), "dist"))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	unauthorized, err := http.Post(httpServer.URL+"/mcp", "application/json", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unauthorized.Body.Close()
+	if unauthorized.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.StatusCode)
+	}
+
+	reader := connectMCP(t, httpServer.URL+"/mcp", "reader-secret")
+	defer reader.Close()
+	readerTools, err := reader.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(readerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
+		t.Fatal("read token received write-capable tool")
+	}
+	writer := connectMCP(t, httpServer.URL+"/mcp", "writer-secret")
+	defer writer.Close()
+	writerTools, err := writer.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(writerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
+		t.Fatal("write token did not receive proposal tool")
+	}
+}
+
+func connectMCP(t *testing.T, endpoint, token string) *mcp.ClientSession {
+	t.Helper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "codeflow-test", Version: "v0.1.0"}, nil)
+	httpClient := &http.Client{}
+	if token != "" {
+		httpClient.Transport = bearerTransport{token: token, next: http.DefaultTransport}
+	}
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: httpClient, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session
+}
+
+type bearerTransport struct {
+	token string
+	next  http.RoundTripper
+}
+
+func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.Header = request.Header.Clone()
+	clone.Header.Set("Authorization", "Bearer "+t.token)
+	return t.next.RoundTrip(clone)
 }

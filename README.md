@@ -4,7 +4,7 @@ A self-hosted prototype of the Linear **Visual Architecture Workspace** plan. On
 
 ## Run locally
 
-Prerequisites: Node 20+ and Go 1.24+.
+Prerequisites: Node 20+ and Go 1.25+.
 
 ```powershell
 npm install
@@ -37,7 +37,7 @@ Then open <http://localhost:8080>. Project state is stored in `data/project.json
 
 ## Agent bridge
 
-The Go service exposes a compact MCP Streamable HTTP-style JSON-RPC endpoint at `POST /mcp` with:
+The Go service uses the official `github.com/modelcontextprotocol/go-sdk` and exposes a standards-compliant, stateless Streamable HTTP endpoint at `/mcp` with:
 
 - `resources/list` and `resources/read` for `architecture://projects/codeflow/graph`
 - `tools/list`
@@ -46,12 +46,22 @@ The Go service exposes a compact MCP Streamable HTTP-style JSON-RPC endpoint at 
 
 Proposed operations are validated against the canonical graph but are not applied until human review. Mutations and proposal acceptance use optimistic `baseRevision` checks.
 
+For local development, the MCP endpoint is open when no token variables are configured. For a shared deployment, set one or both variables before starting the server:
+
+```powershell
+$env:CODEFLOW_MCP_READ_TOKEN = '<random-read-token>'
+$env:CODEFLOW_MCP_WRITE_TOKEN = '<random-write-token>'
+go run ./cmd/server
+```
+
+Send the selected value as `Authorization: Bearer <token>`. The read token can discover the graph resource and `read_architecture`; only the write token can discover or call `propose_architecture_change`. Token comparisons are constant-time, and invalid or missing credentials receive `401 Unauthorized` once token mode is enabled.
+
 ## Verification
 
 ```powershell
 npm test
 ```
 
-This runs Go persistence/revision/proposal tests and a strict TypeScript production build.
+This runs Go persistence/revision/proposal tests and a strict TypeScript production build. MCP integration tests connect the official SDK client to the HTTP server, discover tools/resources, read the graph, submit a review-gated proposal, and verify read/write token scopes.
 
 The graph test suite also covers atomic multi-operation creation, dangling-reference cleanup, and guarded deletion of parent components.

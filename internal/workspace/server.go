@@ -15,10 +15,12 @@ import (
 type Server struct {
 	store     *Store
 	staticDir string
+	mcp       http.Handler
 }
 
 func NewServer(store *Store, staticDir string) http.Handler {
 	s := &Server{store: store, staticDir: staticDir}
+	s.mcp = newMCPHandler(store)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now().UTC()})
@@ -29,7 +31,7 @@ func NewServer(store *Store, staticDir string) http.Handler {
 	mux.HandleFunc("POST /api/proposals/{id}/review", s.reviewProposal)
 	mux.HandleFunc("POST /api/presence", s.presence)
 	mux.HandleFunc("GET /api/events", s.events)
-	mux.HandleFunc("POST /mcp", s.mcp)
+	mux.Handle("/mcp", s.mcp)
 	mux.HandleFunc("/", s.static)
 	return withCORS(mux)
 }
@@ -106,73 +108,6 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type rpcRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      any             `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
-type rpcResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      any    `json:"id"`
-	Result  any    `json:"result,omitempty"`
-	Error   any    `json:"error,omitempty"`
-}
-
-func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
-	var req rpcRequest
-	if !decode(w, r, &req) {
-		return
-	}
-	res := rpcResponse{JSONRPC: "2.0", ID: req.ID}
-	switch req.Method {
-	case "initialize":
-		res.Result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{}, "resources": map[string]any{}}, "serverInfo": map[string]any{"name": "codeflow", "version": "0.1.0"}}
-	case "resources/list":
-		res.Result = map[string]any{"resources": []map[string]any{{"uri": "architecture://projects/codeflow/graph", "name": "Commerce Platform architecture graph", "mimeType": "application/json"}}}
-	case "resources/read":
-		data, _ := json.MarshalIndent(s.store.Snapshot(), "", "  ")
-		res.Result = map[string]any{"contents": []map[string]any{{"uri": "architecture://projects/codeflow/graph", "mimeType": "application/json", "text": string(data)}}}
-	case "tools/list":
-		res.Result = map[string]any{"tools": []map[string]any{
-			{"name": "read_architecture", "description": "Read the canonical project graph and current revision", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}},
-			{"name": "propose_architecture_change", "description": "Submit reviewable operations without mutating the authoritative graph", "inputSchema": map[string]any{"type": "object", "required": []string{"id", "title", "baseRevision", "operations"}}},
-		}}
-	case "tools/call":
-		var params struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		_ = json.Unmarshal(req.Params, &params)
-		if params.Name == "read_architecture" {
-			data, _ := json.MarshalIndent(s.store.Snapshot(), "", "  ")
-			res.Result = map[string]any{"content": []map[string]string{{"type": "text", "text": string(data)}}}
-		} else if params.Name == "propose_architecture_change" {
-			var p Proposal
-			if err := json.Unmarshal(params.Arguments, &p); err != nil {
-				res.Error = rpcErr(-32602, err.Error())
-				break
-			}
-			if p.Author == "" {
-				p.Author = "MCP agent"
-			}
-			p.AuthorType = "agent"
-			project, err := s.store.SaveProposal(p)
-			if err != nil {
-				res.Error = rpcErr(-32000, err.Error())
-				break
-			}
-			data, _ := json.Marshal(map[string]any{"proposalId": p.ID, "status": "pending", "revision": project.Revision})
-			res.Result = map[string]any{"content": []map[string]string{{"type": "text", "text": string(data)}}}
-		} else {
-			res.Error = rpcErr(-32601, "tool not found")
-		}
-	default:
-		res.Error = rpcErr(-32601, "method not found")
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	clean := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/"))
 	if clean == "." {
@@ -222,11 +157,10 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
-func rpcErr(code int, msg string) map[string]any { return map[string]any{"code": code, "message": msg} }
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Protocol-Version, Mcp-Session-Id")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
