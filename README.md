@@ -25,8 +25,12 @@ Then open <http://localhost:8080>. Project state is stored in `data/project.json
 ## Prototype workflows
 
 - Select the same stable component from the canvas or outline.
+- Add typed services, databases, clients, APIs, or generic components and choose their semantic parent.
+- Connect components by dragging between node handles; relationships use the canonical graph and survive reloads.
 - Drag a node and reload to see its view position persist independently of semantic graph data.
-- Edit a component in the inspector or add a service from the floating `+` button.
+- Edit or safely delete a component in the inspector. Deletion removes its blocks and relationships while refusing to orphan child components.
+- Add, edit, and remove requirements, behaviors, API contracts, table schemas, constraints, code sketches, and notes.
+- Open **Activity** to inspect the current revision and attributed graph history.
 - Open **Review** to inspect the seeded agent proposal. Accepting atomically adds its component, edge, and constraint; rejecting leaves the graph unchanged.
 - Open two browser sessions. Graph changes arrive over server-sent events, and active selections appear as presence avatars.
 - Double-click a component containing children to enter its semantic scope; use breadcrumbs to zoom out.
@@ -49,3 +53,5 @@ npm test
 ```
 
 This runs Go persistence/revision/proposal tests and a strict TypeScript production build.
+
+The graph test suite also covers atomic multi-operation creation, dangling-reference cleanup, and guarded deletion of parent components.

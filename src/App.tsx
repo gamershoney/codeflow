@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Edge, type Node, type NodeMouseHandler, type NodeTypes, type OnNodeDrag } from '@xyflow/react'
+import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type Node, type NodeMouseHandler, type NodeTypes, type OnNodeDrag } from '@xyflow/react'
 import { Activity, Bell, Box, ChevronDown, ChevronRight, Command, GitBranch, Grid2X2, History, LayoutDashboard, Menu, MessageSquare, MousePointer2, Plus, Search, Settings2, Sparkles, Users, Waypoints, ZoomIn } from 'lucide-react'
 import { api } from './api'
 import type { Operation, Presence, Project } from './types'
@@ -7,6 +7,8 @@ import { ArchitectureNode } from './components/ArchitectureNode'
 import Outline from './components/Outline'
 import Inspector from './components/Inspector'
 import ProposalDrawer from './components/ProposalDrawer'
+import ComponentDialog from './components/ComponentDialog'
+import ActivityDrawer from './components/ActivityDrawer'
 
 const nodeTypes:NodeTypes={architecture:ArchitectureNode}
 const sessionId=sessionStorage.getItem('codeflow-session')||crypto.randomUUID()
@@ -17,6 +19,8 @@ export default function App(){
   const [selected,setSelected]=useState('cmp_backend')
   const [scope,setScope]=useState('cmp_platform')
   const [proposalOpen,setProposalOpen]=useState(false)
+  const [componentDialogOpen,setComponentDialogOpen]=useState(false)
+  const [activityOpen,setActivityOpen]=useState(false)
   const [presence,setPresence]=useState<Presence[]>([])
   const [toast,setToast]=useState('')
   const [loading,setLoading]=useState(true)
@@ -38,7 +42,7 @@ export default function App(){
   const onNodeClick:NodeMouseHandler=(_,node)=>setSelected(node.id)
   const onNodeDoubleClick:NodeMouseHandler=(_,node)=>{if(project?.components.some(c=>c.parentId===node.id))setScope(node.id)}
   const onNodeDragStop:OnNodeDrag=(_,node)=>mutate([{kind:'move',targetId:node.id,component:{id:'position',type:'view',title:'position',description:'',properties:{x:String(Math.round(node.position.x)),y:String(Math.round(node.position.y))},provenance:{kind:'human',author:'You',confidence:1}}}])
-  const addComponent=()=>{if(!project)return;const id=`cmp_${crypto.randomUUID().slice(0,8)}`;mutate([{kind:'add_component',component:{id,type:'service',title:'New service',description:'Describe this architectural responsibility.',parentId:scope,provenance:{kind:'human',author:'You',confidence:1}}}]).then(()=>setSelected(id))}
+  const connect=(connection:Connection)=>{if(!connection.source||!connection.target)return;const id=`rel_${crypto.randomUUID().slice(0,8)}`;mutate([{kind:'connect',relationship:{id,sourceId:connection.source,targetId:connection.target,kind:'calls',label:'uses',provenance:{kind:'human',author:'You',confidence:1}}}])}
 
   if(loading)return <div className="loading-screen"><div className="brand-mark"><Waypoints/></div><span>Opening architecture workspace…</span></div>
   if(!project)return <div className="loading-screen error">Could not load the project. Start the Go API on port 8080.</div>
@@ -64,21 +68,23 @@ export default function App(){
         <main className="canvas-area">
           <div className="canvas-toolbar">
             <div className="breadcrumbs">{breadcrumbs.map((item,i)=><span key={item.id}><button onClick={()=>setScope(item.id)}>{item.title}</button>{i<breadcrumbs.length-1&&<ChevronRight size={13}/>}</span>)}</div>
-            <div className="canvas-meta"><span><span className="sync-dot"/>Synced</span><span>Revision {project.revision}</span><button><Activity size={13}/> Activity</button></div>
+            <div className="canvas-meta"><span><span className="sync-dot"/>Synced</span><span>Revision {project.revision}</span><button onClick={()=>setActivityOpen(true)}><Activity size={13}/> Activity</button></div>
           </div>
           <div className="canvas-stage">
-            <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodeClick={onNodeClick} onNodeDoubleClick={onNodeDoubleClick} onNodeDragStop={onNodeDragStop} fitView fitViewOptions={{padding:.2}} minZoom={.3} maxZoom={1.8}>
+            <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onConnect={connect} onNodeClick={onNodeClick} onNodeDoubleClick={onNodeDoubleClick} onNodeDragStop={onNodeDragStop} fitView fitViewOptions={{padding:.2}} minZoom={.3} maxZoom={1.8}>
               <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d8d7d0"/>
               <Controls showInteractive={false}/><MiniMap pannable zoomable nodeColor={n=>n.id===selected?'#5546d8':'#d0ced8'} maskColor="rgba(246,246,241,.8)"/>
             </ReactFlow>
-            <div className="floating-tools"><button className="active"><MousePointer2/></button><button onClick={addComponent}><Plus/></button><button><Grid2X2/></button><span/><button><ZoomIn/></button><button><Settings2/></button></div>
-            <div className="canvas-hint">Double-click a component to explore inside</div>
+            <div className="floating-tools"><button className="active"><MousePointer2/></button><button title="Add component" onClick={()=>setComponentDialogOpen(true)}><Plus/></button><button title="Fit and arrange"><Grid2X2/></button><span/><button><ZoomIn/></button><button><Settings2/></button></div>
+            <div className="canvas-hint">Drag between node handles to connect · double-click to explore</div>
           </div>
         </main>
         <Inspector project={project} selected={selected} onMutate={mutate}/>
       </div>
     </div>
     <ProposalDrawer project={project} open={proposalOpen} onClose={()=>setProposalOpen(false)} onReview={review}/>
+    <ComponentDialog open={componentDialogOpen} project={project} parentId={scope} onClose={()=>setComponentDialogOpen(false)} onMutate={mutate}/>
+    <ActivityDrawer project={project} open={activityOpen} onClose={()=>setActivityOpen(false)}/>
     {toast&&<div className="toast">{toast}</div>}
   </div>
 }

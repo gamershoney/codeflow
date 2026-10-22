@@ -143,6 +143,19 @@ func applyOperations(p *Project, ops []Operation) error {
 			if len(p.Views) > 0 {
 				p.Views[0].Positions[op.Component.ID] = Position{X: 520 + float64(len(p.Components)%3)*70, Y: 380}
 			}
+		case "delete_component":
+			if !componentExists(p, op.TargetID) {
+				return fmt.Errorf("component %s not found", op.TargetID)
+			}
+			if slices.ContainsFunc(p.Components, func(c Component) bool { return c.ParentID == op.TargetID }) {
+				return errors.New("move or delete child components first")
+			}
+			p.Components = slices.DeleteFunc(p.Components, func(c Component) bool { return c.ID == op.TargetID })
+			p.Blocks = slices.DeleteFunc(p.Blocks, func(b Block) bool { return b.OwnerComponentID == op.TargetID })
+			p.Relationships = slices.DeleteFunc(p.Relationships, func(r Relationship) bool { return r.SourceID == op.TargetID || r.TargetID == op.TargetID })
+			for i := range p.Views {
+				delete(p.Views[i].Positions, op.TargetID)
+			}
 		case "update_component":
 			idx := slices.IndexFunc(p.Components, func(c Component) bool { return c.ID == op.TargetID })
 			if idx < 0 {
@@ -154,16 +167,47 @@ func applyOperations(p *Project, ops []Operation) error {
 			if op.Description != "" {
 				p.Components[idx].Description = op.Description
 			}
+			if op.Component != nil && op.Component.Properties != nil {
+				p.Components[idx].Properties = op.Component.Properties
+			}
 		case "add_block":
 			if op.Block == nil || op.Block.ID == "" || !componentExists(p, op.Block.OwnerComponentID) {
 				return errors.New("invalid block or owner")
 			}
+			if slices.ContainsFunc(p.Blocks, func(b Block) bool { return b.ID == op.Block.ID }) {
+				return fmt.Errorf("block %s already exists", op.Block.ID)
+			}
 			p.Blocks = append(p.Blocks, *op.Block)
+		case "update_block":
+			if op.Block == nil || op.Block.ID == "" || !componentExists(p, op.Block.OwnerComponentID) {
+				return errors.New("invalid block or owner")
+			}
+			idx := slices.IndexFunc(p.Blocks, func(b Block) bool { return b.ID == op.Block.ID })
+			if idx < 0 {
+				return fmt.Errorf("block %s not found", op.Block.ID)
+			}
+			p.Blocks[idx] = *op.Block
+		case "delete_block":
+			if !slices.ContainsFunc(p.Blocks, func(b Block) bool { return b.ID == op.TargetID }) {
+				return fmt.Errorf("block %s not found", op.TargetID)
+			}
+			p.Blocks = slices.DeleteFunc(p.Blocks, func(b Block) bool { return b.ID == op.TargetID || b.ParentID == op.TargetID })
 		case "connect":
 			if op.Relationship == nil || !componentExists(p, op.Relationship.SourceID) || !componentExists(p, op.Relationship.TargetID) {
 				return errors.New("relationship has a dangling endpoint")
 			}
+			if op.Relationship.SourceID == op.Relationship.TargetID {
+				return errors.New("a relationship cannot connect a component to itself")
+			}
+			if slices.ContainsFunc(p.Relationships, func(r Relationship) bool { return r.ID == op.Relationship.ID }) {
+				return fmt.Errorf("relationship %s already exists", op.Relationship.ID)
+			}
 			p.Relationships = append(p.Relationships, *op.Relationship)
+		case "disconnect":
+			if !slices.ContainsFunc(p.Relationships, func(r Relationship) bool { return r.ID == op.TargetID }) {
+				return fmt.Errorf("relationship %s not found", op.TargetID)
+			}
+			p.Relationships = slices.DeleteFunc(p.Relationships, func(r Relationship) bool { return r.ID == op.TargetID })
 		case "move":
 			if !componentExists(p, op.TargetID) || op.Component == nil {
 				return errors.New("invalid move")
