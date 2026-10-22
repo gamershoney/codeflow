@@ -1,0 +1,11 @@
+export type Provenance = { kind: 'human' | 'verified' | 'inferred'; author: string; confidence: number }
+export type Component = { id:string; type:string; title:string; description:string; parentId?:string; properties?:Record<string,string>; provenance:Provenance }
+export type Block = { id:string; ownerComponentId:string; parentId?:string; type:string; title:string; content:string; properties?:Record<string,string>; childIds?:string[] }
+export type Relationship = { id:string; sourceId:string; targetId:string; kind:string; label:string; provenance:Provenance }
+export type Position = { x:number; y:number }
+export type View = { id:string; name:string; scopeId:string; positions:Record<string,Position> }
+export type Operation = { kind:string; component?:Component; block?:Block; relationship?:Relationship; targetId?:string; title?:string; description?:string }
+export type Proposal = { id:string; title:string; summary:string; author:string; authorType:string; baseRevision:number; status:string; createdAt:string; reviewedAt?:string; reviewer?:string; comment?:string; operations:Operation[] }
+export type HistoryEvent = { id:string; revision:number; kind:string; summary:string; author:string; createdAt:string }
+export type Project = { id:string; name:string; summary:string; revision:number; updatedAt:string; components:Component[]; blocks:Block[]; relationships:Relationship[]; views:View[]; proposals:Proposal[]; history:HistoryEvent[] }
+export type Presence = { sessionId:string; name:string; color:string; selection?:string; lastSeen:string }
