@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type Node, type NodeMouseHandler, type NodeTypes, type OnNodeDrag } from '@xyflow/react'
+import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, useNodesState, type Connection, type Edge, type Node, type NodeMouseHandler, type NodeTypes, type OnNodeDrag } from '@xyflow/react'
 import { Activity, Bell, Box, ChevronDown, ChevronRight, Command, GitBranch, Grid2X2, History, LayoutDashboard, Menu, MessageSquare, MousePointer2, Plus, Search, Settings2, Sparkles, Users, Waypoints, ZoomIn } from 'lucide-react'
 import { api } from './api'
 import type { Operation, Presence, Project } from './types'
@@ -24,6 +24,8 @@ export default function App(){
   const [presence,setPresence]=useState<Presence[]>([])
   const [toast,setToast]=useState('')
   const [loading,setLoading]=useState(true)
+  const [flowNodes,setFlowNodes,onNodesChange]=useNodesState<Node>([])
+  const draggingRef=useRef(false)
   const projectRef=useRef(project); projectRef.current=project
   const refresh=useCallback(async()=>{try{setProject(await api.project())}catch(e){setToast((e as Error).message)}finally{setLoading(false)}},[])
   useEffect(()=>{refresh();const events=new EventSource('/api/events');events.addEventListener('message',e=>{const data=JSON.parse((e as MessageEvent).data);if(data.type==='presence.updated')setPresence(data.presence);else refresh()});return()=>events.close()},[refresh])
@@ -34,14 +36,16 @@ export default function App(){
   const review=async(id:string,decision:'accepted'|'rejected')=>{try{setProject(await api.review(id,decision,decision==='accepted'?'Reviewed against current architecture.':'Needs a narrower scope.'));setToast(decision==='accepted'?'Proposal accepted':'Proposal rejected');setProposalOpen(false)}catch(e){setToast((e as Error).message);await refresh()}}
   const breadcrumbs=useMemo(()=>{if(!project)return[];const result=[];let current=project.components.find(c=>c.id===scope);while(current){result.unshift(current);current=project.components.find(c=>c.id===current?.parentId)}return result},[project,scope])
 
-  const nodes=useMemo<Node[]>(()=>{if(!project)return[];const view=project.views[0];const descendants=project.components.filter(c=>c.parentId===scope || (scope==='cmp_platform'&&c.id!=='cmp_platform'))
-    return descendants.map(c=>({id:c.id,type:'architecture',position:view?.positions[c.id]||{x:Math.random()*500,y:Math.random()*300},data:{title:c.title,type:c.type,description:c.description,selected:c.id===selected,inferred:c.provenance.kind==='inferred',childCount:project.components.filter(n=>n.parentId===c.id).length}}))
+  const canonicalNodes=useMemo<Node[]>(()=>{if(!project)return[];const view=project.views[0];const descendants=project.components.filter(c=>c.parentId===scope || (scope==='cmp_platform'&&c.id!=='cmp_platform'))
+    return descendants.map((c,index)=>({id:c.id,type:'architecture',position:view?.positions[c.id]||{x:80+(index%3)*300,y:120+Math.floor(index/3)*190},data:{title:c.title,type:c.type,description:c.description,selected:c.id===selected,inferred:c.provenance.kind==='inferred',childCount:project.components.filter(n=>n.parentId===c.id).length}}))
   },[project,scope,selected])
-  const visible=new Set(nodes.map(n=>n.id))
-  const edges=useMemo<Edge[]>(()=>project?project.relationships.filter(r=>visible.has(r.sourceId)&&visible.has(r.targetId)).map(r=>({id:r.id,source:r.sourceId,target:r.targetId,label:r.label,type:'smoothstep',markerEnd:{type:MarkerType.ArrowClosed,color:'#8f8ca1'},style:{stroke:'#8f8ca1',strokeWidth:1.5},labelStyle:{fontSize:10,fill:'#6d687a'},labelBgStyle:{fill:'#f6f6f1',fillOpacity:.9}})):[],[project,nodes])
+  useEffect(()=>{if(!draggingRef.current)setFlowNodes(canonicalNodes)},[canonicalNodes,setFlowNodes])
+  const visible=useMemo(()=>new Set(canonicalNodes.map(n=>n.id)),[canonicalNodes])
+  const edges=useMemo<Edge[]>(()=>project?project.relationships.filter(r=>visible.has(r.sourceId)&&visible.has(r.targetId)).map(r=>({id:r.id,source:r.sourceId,target:r.targetId,label:r.label,type:'smoothstep',markerEnd:{type:MarkerType.ArrowClosed,color:'#8f8ca1'},style:{stroke:'#8f8ca1',strokeWidth:1.5},labelStyle:{fontSize:10,fill:'#6d687a'},labelBgStyle:{fill:'#f6f6f1',fillOpacity:.9}})):[],[project,visible])
   const onNodeClick:NodeMouseHandler=(_,node)=>setSelected(node.id)
   const onNodeDoubleClick:NodeMouseHandler=(_,node)=>{if(project?.components.some(c=>c.parentId===node.id))setScope(node.id)}
-  const onNodeDragStop:OnNodeDrag=(_,node)=>mutate([{kind:'move',targetId:node.id,component:{id:'position',type:'view',title:'position',description:'',properties:{x:String(Math.round(node.position.x)),y:String(Math.round(node.position.y))},provenance:{kind:'human',author:'You',confidence:1}}}])
+  const onNodeDragStart:OnNodeDrag=()=>{draggingRef.current=true}
+  const onNodeDragStop:OnNodeDrag=(_,node)=>{draggingRef.current=false;void mutate([{kind:'move',targetId:node.id,component:{id:'position',type:'view',title:'position',description:'',properties:{x:String(Math.round(node.position.x)),y:String(Math.round(node.position.y))},provenance:{kind:'human',author:'You',confidence:1}}}])}
   const connect=(connection:Connection)=>{if(!connection.source||!connection.target)return;const id=`rel_${crypto.randomUUID().slice(0,8)}`;mutate([{kind:'connect',relationship:{id,sourceId:connection.source,targetId:connection.target,kind:'calls',label:'uses',provenance:{kind:'human',author:'You',confidence:1}}}])}
 
   if(loading)return <div className="loading-screen"><div className="brand-mark"><Waypoints/></div><span>Opening architecture workspace…</span></div>
@@ -71,7 +75,7 @@ export default function App(){
             <div className="canvas-meta"><span><span className="sync-dot"/>Synced</span><span>Revision {project.revision}</span><button onClick={()=>setActivityOpen(true)}><Activity size={13}/> Activity</button></div>
           </div>
           <div className="canvas-stage">
-            <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onConnect={connect} onNodeClick={onNodeClick} onNodeDoubleClick={onNodeDoubleClick} onNodeDragStop={onNodeDragStop} fitView fitViewOptions={{padding:.2}} minZoom={.3} maxZoom={1.8}>
+            <ReactFlow nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onConnect={connect} onNodeClick={onNodeClick} onNodeDoubleClick={onNodeDoubleClick} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} fitView fitViewOptions={{padding:.2}} minZoom={.3} maxZoom={1.8}>
               <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d8d7d0"/>
               <Controls showInteractive={false}/><MiniMap pannable zoomable nodeColor={n=>n.id===selected?'#5546d8':'#d0ced8'} maskColor="rgba(246,246,241,.8)"/>
             </ReactFlow>
