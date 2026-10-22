@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bell, Blocks, Box, Check, Copy, GitBranch, History, Link2, Search, Sparkles, X } from 'lucide-react'
-import type { Component, Project } from '../types'
+import { Bell, Blocks, Box, Check, Copy, FolderSearch, GitBranch, History, Link2, LoaderCircle, Search, Sparkles, X } from 'lucide-react'
+import { api } from '../api'
+import type { Component, DiscoveryReport, Project } from '../types'
 
 type SearchAction={id:string;label:string;description:string;icon:typeof Box;run:()=>void}
 
-export function SearchPalette({project,open,onClose,onSelect,onAdd,onReview,onActivity}:{project:Project;open:boolean;onClose:()=>void;onSelect:(id:string)=>void;onAdd:()=>void;onReview:()=>void;onActivity:()=>void}){
+export function SearchPalette({project,open,onClose,onSelect,onAdd,onReview,onActivity,onDiscover}:{project:Project;open:boolean;onClose:()=>void;onSelect:(id:string)=>void;onAdd:()=>void;onReview:()=>void;onActivity:()=>void;onDiscover:()=>void}){
   const [query,setQuery]=useState('')
   useEffect(()=>{if(open)setQuery('')},[open])
   const actions=useMemo<SearchAction[]>(()=>[
@@ -14,7 +15,8 @@ export function SearchPalette({project,open,onClose,onSelect,onAdd,onReview,onAc
     {id:'action-add',label:'Add component',description:'Create a new architecture component',icon:Box,run:onAdd},
     {id:'action-review',label:'Review proposals',description:'Inspect pending agent changes',icon:Sparkles,run:onReview},
     {id:'action-activity',label:'Open activity',description:'View revision history',icon:History,run:onActivity},
-  ],[project,onSelect,onAdd,onReview,onActivity])
+    {id:'action-discover',label:'Discover repository',description:'Inspect a local codebase without modifying it',icon:FolderSearch,run:onDiscover},
+  ],[project,onSelect,onAdd,onReview,onActivity,onDiscover])
   const results=actions.filter(item=>`${item.label} ${item.description}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0,12)
   if(!open)return null
   const choose=(item:SearchAction)=>{item.run();onClose()}
@@ -25,6 +27,28 @@ export function SearchPalette({project,open,onClose,onSelect,onAdd,onReview,onAc
       <div className="command-footer"><span>Searches the canonical graph</span><span><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>↵</kbd> open</span></div>
     </div>
   </div>
+}
+
+export function RepositoryDiscoveryDialog({open,onClose}:{open:boolean;onClose:()=>void}){
+  const [path,setPath]=useState('')
+  const [report,setReport]=useState<DiscoveryReport|null>(null)
+  const [error,setError]=useState('')
+  const [busy,setBusy]=useState(false)
+  if(!open)return null
+  const scan=async(event:React.FormEvent)=>{event.preventDefault();if(!path.trim())return;setBusy(true);setError('');setReport(null);try{setReport(await api.discover(path.trim()))}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  const componentById=(id:string)=>report?.components.find(item=>item.id===id)
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose()}}><div className="discovery-dialog">
+    <div className="dialog-head"><div><span className="eyebrow">Repository intelligence</span><h2>Discover a local codebase</h2></div><button className="icon-button" onClick={onClose}><X size={16}/></button></div>
+    <p className="discovery-note">Read-only scan. Paths must be inside <code>CODEFLOW_DISCOVERY_ROOTS</code>; source and architecture data are not changed.</p>
+    <form className="discovery-form" onSubmit={scan}><input autoFocus value={path} onChange={event=>setPath(event.target.value)} placeholder="H:\ProjectsFolder\YourProject"/><button disabled={!path.trim()||busy}>{busy?<LoaderCircle className="spin" size={14}/>:<FolderSearch size={14}/>} {busy?'Scanning…':'Scan repository'}</button></form>
+    {error&&<div className="discovery-error">{error}</div>}
+    {report&&<div className="discovery-results">
+      <div className="discovery-summary"><div><span>{report.kind}</span><h3>{report.name}</h3><small>{report.root}</small></div><div><b>{report.sourceFiles}</b><span>source files</span></div><div><b>{report.components.length}</b><span>components</span></div><div><b>{report.dependencies.length}</b><span>dependencies</span></div></div>
+      <div className="discovery-tags">{report.frameworks.map(item=><span key={item}>{item}</span>)}{Object.entries(report.languages).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([name,count])=><span key={name}>{name} · {count}</span>)}</div>
+      {report.warnings?.map(warning=><div className="discovery-warning" key={warning}>{warning}</div>)}
+      <div className="discovery-columns"><section><h4>Detected components</h4>{report.components.slice(0,40).map(item=><div className="discovery-row" key={item.id}><span><b>{item.name}</b><small>{item.path}</small></span><em>{item.language} · {item.fileCount}</em></div>)}</section><section><h4>Evidence-backed dependencies</h4>{report.dependencies.slice(0,40).map(item=><div className="discovery-row" key={`${item.sourceId}-${item.targetId}`}><span><b>{componentById(item.sourceId)?.name} → {componentById(item.targetId)?.name}</b><small>{item.evidence[0]}</small></span><em>{item.count} imports</em></div>)}</section></div>
+    </div>}
+  </div></div>
 }
 
 export function ShareDialog({project,open,onClose,onNotify}:{project:Project;open:boolean;onClose:()=>void;onNotify:(message:string)=>void}){

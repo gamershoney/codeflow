@@ -9,3 +9,6 @@ export type Proposal = { id:string; title:string; summary:string; author:string;
 export type HistoryEvent = { id:string; revision:number; kind:string; summary:string; author:string; createdAt:string }
 export type Project = { id:string; name:string; summary:string; revision:number; updatedAt:string; components:Component[]; blocks:Block[]; relationships:Relationship[]; views:View[]; proposals:Proposal[]; history:HistoryEvent[] }
 export type Presence = { sessionId:string; name:string; color:string; selection?:string; lastSeen:string }
+export type DiscoveryComponent = { id:string;name:string;path:string;kind:string;language:string;fileCount:number;symbolCount:number;symbols?:string[] }
+export type DiscoveryDependency = { sourceId:string;targetId:string;kind:string;count:number;evidence:string[] }
+export type DiscoveryReport = { root:string;name:string;kind:string;generatedAt:string;totalFiles:number;sourceFiles:number;languages:Record<string,number>;frameworks:string[];manifests:string[];components:DiscoveryComponent[];dependencies:DiscoveryDependency[];warnings?:string[];truncated:boolean }

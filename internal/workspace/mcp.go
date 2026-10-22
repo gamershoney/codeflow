@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"codeflow/internal/discovery"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -38,6 +39,10 @@ type proposeArchitectureOutput struct {
 	Status     string `json:"status"`
 	Revision   int64  `json:"revision"`
 }
+type discoverRepositoryInput struct {
+	Path     string `json:"path" jsonschema:"absolute or configured-root-relative repository directory to inspect"`
+	MaxFiles int    `json:"maxFiles,omitempty" jsonschema:"maximum number of files to inventory; defaults to 25000"`
+}
 
 func newMCPHandler(store *Store) http.Handler {
 	readServer := buildMCPServer(store, false)
@@ -66,6 +71,14 @@ func buildMCPServer(store *Store, writable bool) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "read_architecture", Description: "Read the canonical CodeFlow architecture graph and its current optimistic-lock revision."},
 		func(_ context.Context, _ *mcp.CallToolRequest, _ readArchitectureInput) (*mcp.CallToolResult, readArchitectureOutput, error) {
 			return nil, readArchitectureOutput{Project: store.Snapshot()}, nil
+		})
+	mcp.AddTool(server, &mcp.Tool{Name: "discover_repository", Description: "Read a configured local repository and return detected languages, frameworks, source components, symbols, and evidence-backed dependency edges. This tool never modifies repository files or the architecture graph."},
+		func(_ context.Context, _ *mcp.CallToolRequest, input discoverRepositoryInput) (*mcp.CallToolResult, discovery.Report, error) {
+			report, err := discoverRepository(input.Path, input.MaxFiles)
+			if err != nil {
+				return nil, discovery.Report{}, err
+			}
+			return nil, report, nil
 		})
 	if writable {
 		mcp.AddTool(server, &mcp.Tool{Name: "propose_architecture_change", Description: "Validate and submit an attributed, revision-bound architecture change for human review. This never mutates the authoritative graph directly."},

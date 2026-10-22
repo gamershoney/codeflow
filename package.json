@@ -6,6 +6,7 @@
     "dev": "concurrently -n web,api -c cyan,green \"vite\" \"go run ./cmd/server\"",
     "build": "tsc -b && vite build",
     "start": "go run ./cmd/server",
+    "discover": "go run ./cmd/discover",
     "test": "go test ./... && npm run build"
   },
   "dependencies": {

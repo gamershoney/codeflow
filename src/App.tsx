@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, useNodesState, type Connection, type Edge, type Node, type NodeMouseHandler, type NodeTypes, type OnNodeDrag, type ReactFlowInstance } from '@xyflow/react'
-import { Activity, Bell, Box, ChevronDown, ChevronRight, Command, GitBranch, Grid2X2, History, LayoutDashboard, Menu, MessageSquare, MousePointer2, Plus, Search, Settings2, Sparkles, Users, Waypoints, ZoomIn } from 'lucide-react'
+import { Activity, Bell, Box, ChevronDown, ChevronRight, Command, FolderSearch, GitBranch, Grid2X2, History, LayoutDashboard, Menu, MessageSquare, MousePointer2, Plus, Search, Settings2, Sparkles, Users, Waypoints, ZoomIn } from 'lucide-react'
 import { api } from './api'
 import type { Operation, Presence, Project } from './types'
 import { ArchitectureNode } from './components/ArchitectureNode'
@@ -9,7 +9,7 @@ import Inspector from './components/Inspector'
 import ProposalDrawer from './components/ProposalDrawer'
 import ComponentDialog from './components/ComponentDialog'
 import ActivityDrawer from './components/ActivityDrawer'
-import { CatalogView, NotificationsPopover, ProjectMenu, SearchPalette, SettingsDialog, ShareDialog, type CanvasPreferences } from './components/WorkspacePanels'
+import { CatalogView, NotificationsPopover, ProjectMenu, RepositoryDiscoveryDialog, SearchPalette, SettingsDialog, ShareDialog, type CanvasPreferences } from './components/WorkspacePanels'
 
 const nodeTypes:NodeTypes={architecture:ArchitectureNode}
 const sessionId=sessionStorage.getItem('codeflow-session')||crypto.randomUUID()
@@ -32,6 +32,7 @@ export default function App(){
   const [settingsOpen,setSettingsOpen]=useState(false)
   const [projectMenuOpen,setProjectMenuOpen]=useState(false)
   const [notificationsOpen,setNotificationsOpen]=useState(false)
+  const [discoveryOpen,setDiscoveryOpen]=useState(false)
   const [preferences,setPreferences]=useState<CanvasPreferences>(()=>{try{return {...{showGrid:true,showMinimap:true,snapToGrid:false},...JSON.parse(localStorage.getItem('codeflow-canvas-preferences')||'{}')}}catch{return {showGrid:true,showMinimap:true,snapToGrid:false}}})
   const [flowNodes,setFlowNodes,onNodesChange]=useNodesState<Node>([])
   const draggingRef=useRef(false)
@@ -68,7 +69,7 @@ export default function App(){
   return <div className="app-shell">
     <nav className="rail" aria-label="Workspace sections">
       <div className="brand-mark"><Waypoints size={20}/></div>
-      <div className="rail-main"><button title="Architecture canvas" aria-label="Architecture canvas" className={activeView==='architecture'?'active':''} onClick={()=>setActiveView('architecture')}><LayoutDashboard/></button><button title="Relationships" aria-label="Relationships" className={activeView==='relationships'?'active':''} onClick={()=>setActiveView('relationships')}><GitBranch/></button><button title="Structured blocks" aria-label="Structured blocks" className={activeView==='blocks'?'active':''} onClick={()=>setActiveView('blocks')}><MessageSquare/></button><button title="Revision history" aria-label="Revision history" onClick={()=>setActivityOpen(true)}><History/></button></div>
+      <div className="rail-main"><button title="Architecture canvas" aria-label="Architecture canvas" className={activeView==='architecture'?'active':''} onClick={()=>setActiveView('architecture')}><LayoutDashboard/></button><button title="Relationships" aria-label="Relationships" className={activeView==='relationships'?'active':''} onClick={()=>setActiveView('relationships')}><GitBranch/></button><button title="Structured blocks" aria-label="Structured blocks" className={activeView==='blocks'?'active':''} onClick={()=>setActiveView('blocks')}><MessageSquare/></button><button title="Discover repository" aria-label="Discover repository" onClick={()=>setDiscoveryOpen(true)}><FolderSearch/></button><button title="Revision history" aria-label="Revision history" onClick={()=>setActivityOpen(true)}><History/></button></div>
       <div className="rail-bottom"><div className="popover-anchor"><button title="Notifications" aria-label="Notifications" className={notificationsOpen?'active':''} onClick={()=>{setNotificationsOpen(value=>!value);setProjectMenuOpen(false)}}><Bell/></button>{pending>0&&<i className="rail-badge">{pending}</i>}<NotificationsPopover project={project} open={notificationsOpen} onReview={()=>{setNotificationsOpen(false);setProposalOpen(true)}} onActivity={()=>{setNotificationsOpen(false);setActivityOpen(true)}}/></div><span className="user-avatar" title="Signed in as You">BS</span></div>
     </nav>
     <div className="workspace">
@@ -103,9 +104,10 @@ export default function App(){
     <ProposalDrawer project={project} open={proposalOpen} onClose={()=>setProposalOpen(false)} onReview={review}/>
     <ComponentDialog open={componentDialogOpen} project={project} parentId={scope} onClose={()=>setComponentDialogOpen(false)} onMutate={mutate}/>
     <ActivityDrawer project={project} open={activityOpen} onClose={()=>setActivityOpen(false)}/>
-    <SearchPalette project={project} open={searchOpen} onClose={()=>setSearchOpen(false)} onSelect={selectComponent} onAdd={()=>setComponentDialogOpen(true)} onReview={()=>setProposalOpen(true)} onActivity={()=>setActivityOpen(true)}/>
+    <SearchPalette project={project} open={searchOpen} onClose={()=>setSearchOpen(false)} onSelect={selectComponent} onAdd={()=>setComponentDialogOpen(true)} onReview={()=>setProposalOpen(true)} onActivity={()=>setActivityOpen(true)} onDiscover={()=>setDiscoveryOpen(true)}/>
     <ShareDialog project={project} open={shareOpen} onClose={()=>setShareOpen(false)} onNotify={setToast}/>
     <SettingsDialog open={settingsOpen} value={preferences} onChange={updatePreferences} onClose={()=>setSettingsOpen(false)}/>
+    <RepositoryDiscoveryDialog open={discoveryOpen} onClose={()=>setDiscoveryOpen(false)}/>
     {toast&&<div className="toast">{toast}</div>}
   </div>
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -111,6 +112,36 @@ func TestMCPBearerScopes(t *testing.T) {
 	}
 	if !slices.ContainsFunc(writerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
 		t.Fatal("write token did not receive proposal tool")
+	}
+}
+
+func TestOfficialMCPRepositoryDiscoveryIsReadOnlyAndScoped(t *testing.T) {
+	repository := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repository, "go.mod"), []byte("module fixture.test/repo\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEFLOW_DISCOVERY_ROOTS", repository)
+	store, _ := NewStore(filepath.Join(t.TempDir(), "project.json"))
+	httpServer := httptest.NewServer(NewServer(store, filepath.Join(t.TempDir(), "dist")))
+	defer httpServer.Close()
+	session := connectMCP(t, httpServer.URL+"/mcp", "")
+	defer session.Close()
+	before := store.Snapshot()
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "discover_repository", Arguments: discoverRepositoryInput{Path: repository}})
+	if err != nil || result.IsError {
+		t.Fatalf("repository discovery failed: err=%v result=%#v", err, result)
+	}
+	after := store.Snapshot()
+	if after.Revision != before.Revision || len(after.Components) != len(before.Components) {
+		t.Fatal("read-only discovery mutated the architecture graph")
+	}
+	outside := filepath.Dir(repository)
+	blocked, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "discover_repository", Arguments: discoverRepositoryInput{Path: outside}})
+	if err == nil && !blocked.IsError {
+		t.Fatal("discovery read outside configured roots")
 	}
 }
 
