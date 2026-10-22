@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>. The Vite frontend proxies the Go API at <http://localhost:8080>.
+Open <http://localhost:5173>. The Vite frontend proxies the Go API at <http://localhost:8787>.
 
 For the production-style single-server build:
 
@@ -20,7 +20,7 @@ npm run build
 go run ./cmd/server
 ```
 
-Then open <http://localhost:8080>. Project state is stored in `data/project.json` and survives restarts.
+Then open <http://localhost:8787>. Project state is stored in `data/project.json` and survives restarts.
 
 ## Prototype workflows
 

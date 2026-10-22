@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	addr := env("CODEFLOW_ADDR", ":8080")
+	addr := env("CODEFLOW_ADDR", ":8787")
 	data := env("CODEFLOW_DATA", "data/project.json")
 	store, err := workspace.NewStore(data)
 	if err != nil {

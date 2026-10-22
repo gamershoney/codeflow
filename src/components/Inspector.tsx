@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import { ArrowUpRight, Braces, Check, ChevronRight, Code2, Database, GitBranch, PencilLine, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
 import type { Block, Operation, Project } from '../types'
 
-type Props={project:Project;selected:string;onMutate:(ops:Operation[])=>Promise<void>}
+type Props={project:Project;selected:string;onMutate:(ops:Operation[])=>Promise<void>;onSelect:(id:string)=>void;onNotify:(message:string)=>void}
 const blockIcons:Record<string,typeof Braces>={api:Braces,table:Database,code:Code2,requirement:ShieldCheck,behavior:GitBranch,constraint:ShieldCheck,note:PencilLine}
 const blockTypes=['requirement','behavior','api','table','constraint','code','note']
 
-export default function Inspector({project,selected,onMutate}:Props){
+export default function Inspector({project,selected,onMutate,onSelect,onNotify}:Props){
   const component=project.components.find(c=>c.id===selected) || project.components[0]
   const blocks=project.blocks.filter(b=>b.ownerComponentId===component?.id)
   const [title,setTitle]=useState(component?.title||'');const [description,setDescription]=useState(component?.description||'');const [editing,setEditing]=useState(false);const [addingBlock,setAddingBlock]=useState(false);const [editBlock,setEditBlock]=useState<Block|null>(null)
@@ -24,8 +24,8 @@ export default function Inspector({project,selected,onMutate}:Props){
     {(addingBlock||editBlock)&&<BlockEditor key={editBlock?.id||'new'} owner={component.id} block={editBlock} onCancel={()=>{setAddingBlock(false);setEditBlock(null)}} onSave={async block=>{await onMutate([{kind:editBlock?'update_block':'add_block',block}]);setAddingBlock(false);setEditBlock(null)}}/>}
     <div className="block-list">{blocks.length?blocks.map(block=><BlockCard block={block} key={block.id} onEdit={()=>{setEditBlock(block);setAddingBlock(false)}} onDelete={()=>onMutate([{kind:'delete_block',targetId:block.id}])}/>):<div className="empty-mini">No blocks yet. Add a requirement, contract, schema, or note.</div>}</div>
     <div className="section-title"><span>Relationships</span><b>{project.relationships.filter(r=>r.sourceId===component.id||r.targetId===component.id).length}</b></div>
-    <div className="relationship-list">{project.relationships.filter(r=>r.sourceId===component.id||r.targetId===component.id).map(r=>{const outgoing=r.sourceId===component.id;const peer=project.components.find(c=>c.id===(outgoing?r.targetId:r.sourceId));return <div className="relationship-row" key={r.id}><button><GitBranch size={13}/><span>{outgoing?'to':'from'} <b>{peer?.title}</b><small>{r.label}</small></span><ChevronRight size={14}/></button><button className="row-delete" title="Remove relationship" onClick={()=>onMutate([{kind:'disconnect',targetId:r.id}])}><X size={12}/></button></div>})}</div>
-    <button className="source-link"><Code2 size={14}/> Copy portable source reference <ArrowUpRight size={13}/></button>
+    <div className="relationship-list">{project.relationships.filter(r=>r.sourceId===component.id||r.targetId===component.id).map(r=>{const outgoing=r.sourceId===component.id;const peer=project.components.find(c=>c.id===(outgoing?r.targetId:r.sourceId));return <div className="relationship-row" key={r.id}><button onClick={()=>peer&&onSelect(peer.id)}><GitBranch size={13}/><span>{outgoing?'to':'from'} <b>{peer?.title}</b><small>{r.label}</small></span><ChevronRight size={14}/></button><button className="row-delete" title="Remove relationship" onClick={()=>onMutate([{kind:'disconnect',targetId:r.id}])}><X size={12}/></button></div>})}</div>
+    <button className="source-link" onClick={async()=>{await navigator.clipboard.writeText(`codeflow://project/${project.id}/component/${component.id}`);onNotify('Portable source reference copied')}}><Code2 size={14}/> Copy portable source reference <ArrowUpRight size={13}/></button>
     {component.id!=='cmp_platform'&&<button className="danger-link" onClick={deleteComponent}><Trash2 size={13}/> Delete component</button>}
   </aside>
 }

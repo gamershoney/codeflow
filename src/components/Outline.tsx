@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, CircleDot, Database, FileCode2, Globe2, ListTree, Plus, Server } from 'lucide-react'
 import type { Component, Project } from '../types'
 
-type Props={project:Project; selected:string; onSelect:(id:string)=>void}
+type Props={project:Project; selected:string; onSelect:(id:string)=>void;onAdd:()=>void}
 const iconMap:Record<string,typeof Server>={client:Globe2,service:Server,database:Database,system:ListTree}
 
-export default function Outline({project,selected,onSelect}:Props){
+export default function Outline({project,selected,onSelect,onAdd}:Props){
   const [expanded,setExpanded]=useState<Set<string>>(new Set(['cmp_platform','cmp_backend']))
   const children=useMemo(()=>{
     const map:Record<string,Component[]>={}
@@ -25,7 +25,7 @@ export default function Outline({project,selected,onSelect}:Props){
     </div>
   }
   return <aside className="outline-panel">
-    <div className="panel-label"><span>Architecture</span><button><Plus size={14}/></button></div>
+    <div className="panel-label"><span>Architecture</span><button title="Add component" aria-label="Add component" onClick={onAdd}><Plus size={14}/></button></div>
     <div className="outline-tree">{(children.root||[]).map(item=>row(item,0))}</div>
     <div className="outline-footer"><div className="tiny-pulse"/><span>Live model</span><b>r{project.revision}</b></div>
   </aside>
