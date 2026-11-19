@@ -3,6 +3,10 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,7 +14,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -118,6 +124,124 @@ func TestMCPBearerScopes(t *testing.T) {
 	if !slices.ContainsFunc(writerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_discovered_architecture" }) {
 		t.Fatal("write token did not receive discovery proposal tool")
 	}
+}
+
+func TestMCPOAuthMetadataJWTValidationAndScopes(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const keyID = "codeflow-test-key"
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"keys": []any{map[string]any{
+			"kty": "RSA", "kid": keyID, "use": "sig", "alg": "RS256",
+			"n": base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()), "e": "AQAB",
+		}}})
+	}))
+	defer jwksServer.Close()
+
+	const resource = "https://codeflow.example.test"
+	const issuer = "https://identity.example.test/"
+	t.Setenv("CODEFLOW_MCP_RESOURCE", resource)
+	t.Setenv("CODEFLOW_MCP_OAUTH_ISSUER", issuer)
+	t.Setenv("CODEFLOW_MCP_OAUTH_JWKS_URL", jwksServer.URL)
+	store, _ := NewStore(filepath.Join(t.TempDir(), "project.json"))
+	httpServer := httptest.NewServer(NewServer(store, filepath.Join(t.TempDir(), "dist")))
+	defer httpServer.Close()
+
+	metadataResponse, err := http.Get(httpServer.URL + "/.well-known/oauth-protected-resource")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer metadataResponse.Body.Close()
+	var metadata map[string]any
+	if err := json.NewDecoder(metadataResponse.Body).Decode(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadataResponse.StatusCode != http.StatusOK || metadata["resource"] != resource {
+		t.Fatalf("protected resource metadata = %d %#v", metadataResponse.StatusCode, metadata)
+	}
+
+	unauthorized, err := http.Post(httpServer.URL+"/mcp", "application/json", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unauthorized.Body.Close()
+	challenge := unauthorized.Header.Get("WWW-Authenticate")
+	if unauthorized.StatusCode != http.StatusUnauthorized || !strings.Contains(challenge, "resource_metadata=") || !strings.Contains(challenge, defaultMCPWriteScope) {
+		t.Fatalf("OAuth challenge = %d %q", unauthorized.StatusCode, challenge)
+	}
+
+	readJWT := signMCPTestJWT(t, privateKey, keyID, issuer, resource, []string{defaultMCPReadScope})
+	reader := connectMCP(t, httpServer.URL+"/mcp", readJWT)
+	defer reader.Close()
+	readerTools, err := reader.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(readerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
+		t.Fatal("OAuth read scope received write-capable tools")
+	}
+	readToolIndex := slices.IndexFunc(readerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "read_architecture" })
+	if readToolIndex < 0 {
+		t.Fatal("read tool was not discovered")
+	}
+	readTool := readerTools.Tools[readToolIndex]
+	if readTool.Meta == nil || readTool.Meta["securitySchemes"] == nil {
+		t.Fatal("read tool did not advertise its OAuth security scheme")
+	}
+
+	writeJWT := signMCPTestJWT(t, privateKey, keyID, issuer, resource, []string{defaultMCPReadScope, defaultMCPWriteScope})
+	writer := connectMCP(t, httpServer.URL+"/mcp", writeJWT)
+	defer writer.Close()
+	writerTools, err := writer.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(writerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
+		t.Fatal("OAuth write scope did not receive write-capable tools")
+	}
+
+	wrongAudience := signMCPTestJWT(t, privateKey, keyID, issuer, "https://other.example.test", []string{defaultMCPReadScope, defaultMCPWriteScope})
+	request, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/mcp", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+wrongAudience)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong-audience token status = %d", response.StatusCode)
+	}
+
+	writeOnly := signMCPTestJWT(t, privateKey, keyID, issuer, resource, []string{defaultMCPWriteScope})
+	request, _ = http.NewRequest(http.MethodPost, httpServer.URL+"/mcp", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+writeOnly)
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("write-only token status = %d", response.StatusCode)
+	}
+}
+
+func signMCPTestJWT(t *testing.T, privateKey *rsa.PrivateKey, keyID, issuer, audience string, scopes []string) string {
+	t.Helper()
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": issuer, "aud": audience, "sub": "codeflow-test-user", "scope": strings.Join(scopes, " "),
+		"iat": now.Unix(), "nbf": now.Add(-time.Second).Unix(), "exp": now.Add(time.Hour).Unix(),
+	})
+	token.Header["kid"] = keyID
+	signed, err := token.SignedString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signed
 }
 
 func TestOfficialMCPRepositoryDiscoveryIsReadOnlyAndScoped(t *testing.T) {

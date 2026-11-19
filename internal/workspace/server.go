@@ -20,8 +20,13 @@ type Server struct {
 
 func NewServer(store *Store, staticDir string) http.Handler {
 	s := &Server{store: store, staticDir: staticDir}
-	s.mcp = newMCPHandler(store)
+	mcpService := newMCPService(store)
+	s.mcp = mcpService.Handler
 	mux := http.NewServeMux()
+	if mcpService.MetadataHandler != nil {
+		mux.Handle("/.well-known/oauth-protected-resource", mcpService.MetadataHandler)
+		mux.Handle("/.well-known/oauth-protected-resource/mcp", mcpService.MetadataHandler)
+	}
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now().UTC()})
 	})

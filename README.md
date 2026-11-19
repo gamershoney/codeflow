@@ -69,7 +69,7 @@ The Go service uses the official `github.com/modelcontextprotocol/go-sdk` and ex
 
 Proposed operations are validated against the canonical graph but are not applied until human review. Mutations and proposal acceptance use optimistic `baseRevision` checks.
 
-For local development, the MCP endpoint is open when no token variables are configured. For a shared deployment, set one or both variables before starting the server:
+For local development, the MCP endpoint is open when no authentication variables are configured. Never expose that mode outside a trusted machine. Local Codex clients can use fixed read/write tokens:
 
 ```powershell
 $env:CODEFLOW_MCP_READ_TOKEN = '<random-read-token>'
@@ -78,6 +78,23 @@ go run ./cmd/server
 ```
 
 Send the selected value as `Authorization: Bearer <token>`. The read token can discover the graph resource and call `read_architecture` or scoped `discover_repository`; only the write token can create proposals with `propose_discovered_architecture` or `propose_architecture_change`. Token comparisons are constant-time, and invalid or missing credentials receive `401 Unauthorized` once token mode is enabled.
+
+### OAuth for ChatGPT and remote clients
+
+For a remote ChatGPT plugin, configure CodeFlow as an OAuth 2.1 resource server backed by an established identity provider such as Auth0. The provider must issue signed JWT access tokens with the expected issuer, audience, expiration, and `codeflow:read` / `codeflow:write` scopes.
+
+```powershell
+$env:CODEFLOW_MCP_RESOURCE = 'https://codeflow.example.com'
+$env:CODEFLOW_MCP_OAUTH_ISSUER = 'https://your-tenant.example-idp.com/'
+$env:CODEFLOW_MCP_OAUTH_JWKS_URL = 'https://your-tenant.example-idp.com/.well-known/jwks.json'
+# Optional when the provider audience differs from the resource identifier:
+$env:CODEFLOW_MCP_OAUTH_AUDIENCE = 'https://codeflow.example.com'
+go run ./cmd/server
+```
+
+Connect the client to `https://codeflow.example.com/mcp`. CodeFlow publishes RFC 9728 protected-resource metadata at `/.well-known/oauth-protected-resource`, returns a discoverable `WWW-Authenticate` challenge, and advertises per-tool OAuth security schemes. Access tokens are verified against the provider's JWKS with an HTTPS-only fetch, accepted signing algorithms, issuer, audience, expiry/not-before, and scopes. Signing keys are cached and refreshed safely for rotation.
+
+The default scopes are `codeflow:read` and `codeflow:write`; override them with `CODEFLOW_MCP_OAUTH_READ_SCOPE` and `CODEFLOW_MCP_OAUTH_WRITE_SCOPE` only when the identity provider uses different names. A write token must contain both scopes. Fixed local tokens can remain enabled alongside OAuth for trusted local automation.
 
 ## Verification
 
