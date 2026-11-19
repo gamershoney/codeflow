@@ -101,7 +101,9 @@ func TestMCPBearerScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.ContainsFunc(readerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
+	if slices.ContainsFunc(readerTools.Tools, func(tool *mcp.Tool) bool {
+		return tool.Name == "propose_architecture_change" || tool.Name == "propose_discovered_architecture"
+	}) {
 		t.Fatal("read token received write-capable tool")
 	}
 	writer := connectMCP(t, httpServer.URL+"/mcp", "writer-secret")
@@ -113,6 +115,9 @@ func TestMCPBearerScopes(t *testing.T) {
 	if !slices.ContainsFunc(writerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_architecture_change" }) {
 		t.Fatal("write token did not receive proposal tool")
 	}
+	if !slices.ContainsFunc(writerTools.Tools, func(tool *mcp.Tool) bool { return tool.Name == "propose_discovered_architecture" }) {
+		t.Fatal("write token did not receive discovery proposal tool")
+	}
 }
 
 func TestOfficialMCPRepositoryDiscoveryIsReadOnlyAndScoped(t *testing.T) {
@@ -120,7 +125,16 @@ func TestOfficialMCPRepositoryDiscoveryIsReadOnlyAndScoped(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repository, "go.mod"), []byte("module fixture.test/repo\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repository, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(repository, "cmd", "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repository, "internal", "store"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "cmd", "api", "main.go"), []byte("package main\nimport \"fixture.test/repo/internal/store\"\nfunc main() { store.Open() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "internal", "store", "store.go"), []byte("package store\nfunc Open() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CODEFLOW_DISCOVERY_ROOTS", repository)
@@ -137,6 +151,29 @@ func TestOfficialMCPRepositoryDiscoveryIsReadOnlyAndScoped(t *testing.T) {
 	after := store.Snapshot()
 	if after.Revision != before.Revision || len(after.Components) != len(before.Components) {
 		t.Fatal("read-only discovery mutated the architecture graph")
+	}
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "propose_discovered_architecture", Arguments: proposeDiscoveredArchitectureInput{Path: repository, BaseRevision: before.Revision, Author: "integration-test"}})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("discovered architecture proposal failed: err=%v result=%#v", err, proposalResult)
+	}
+	proposed := store.Snapshot()
+	if proposed.Revision != before.Revision || len(proposed.Components) != len(before.Components) || len(proposed.Proposals) != len(before.Proposals)+1 {
+		t.Fatal("discovery proposal bypassed review or was not recorded")
+	}
+	proposal := proposed.Proposals[0]
+	if len(proposal.Operations) < 4 {
+		t.Fatalf("proposal operations = %d, want repository, packages, and dependency", len(proposal.Operations))
+	}
+	accepted, err := store.Review(proposal.ID, ReviewRequest{Reviewer: "integration-test", Decision: "accepted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accepted.Components) < len(before.Components)+3 || len(accepted.Relationships) < len(before.Relationships)+1 {
+		t.Fatal("accepted discovery proposal did not create the repository chart")
+	}
+	upToDate, err := proposeDiscoveredArchitecture(store, DiscoveryProposalRequest{Path: repository, BaseRevision: accepted.Revision})
+	if err != nil || upToDate.Status != "up_to_date" || upToDate.OperationCount != 0 {
+		t.Fatalf("repeat discovery was not idempotent: result=%#v err=%v", upToDate, err)
 	}
 	outside := filepath.Dir(repository)
 	blocked, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "discover_repository", Arguments: discoverRepositoryInput{Path: outside}})

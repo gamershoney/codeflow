@@ -27,6 +27,7 @@ func NewServer(store *Store, staticDir string) http.Handler {
 	})
 	mux.HandleFunc("GET /api/project", s.getProject)
 	mux.HandleFunc("POST /api/discovery", s.discover)
+	mux.HandleFunc("POST /api/discovery/proposals", s.proposeDiscovery)
 	mux.HandleFunc("POST /api/mutations", s.mutate)
 	mux.HandleFunc("POST /api/proposals", s.createProposal)
 	mux.HandleFunc("POST /api/proposals/{id}/review", s.reviewProposal)
@@ -35,6 +36,23 @@ func NewServer(store *Store, staticDir string) http.Handler {
 	mux.Handle("/mcp", s.mcp)
 	mux.HandleFunc("/", s.static)
 	return withCORS(mux)
+}
+
+func (s *Server) proposeDiscovery(w http.ResponseWriter, r *http.Request) {
+	var req DiscoveryProposalRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	result, err := proposeDiscoveredArchitecture(s.store, req)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, ErrConflict) {
+			status = http.StatusConflict
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) discover(w http.ResponseWriter, r *http.Request) {

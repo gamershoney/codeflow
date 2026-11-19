@@ -164,7 +164,7 @@ func Scan(root string, options Options) (Report, error) {
 		dir := cleanPath(filepath.Dir(rel))
 		build := components[dir]
 		if build == nil {
-			build = &componentBuild{component: Component{ID: stableID("component", dir), Name: componentName(dir, report.Name), Path: dir, Kind: componentKind(dir), Language: language}, languages: map[string]int{}}
+			build = &componentBuild{component: Component{ID: stableID("component", absRoot+"|"+dir), Name: componentName(dir, report.Name), Path: dir, Kind: componentKind(dir), Language: language}, languages: map[string]int{}}
 			components[dir] = build
 		}
 		build.component.FileCount++

@@ -43,6 +43,22 @@ type discoverRepositoryInput struct {
 	Path     string `json:"path" jsonschema:"absolute or configured-root-relative repository directory to inspect"`
 	MaxFiles int    `json:"maxFiles,omitempty" jsonschema:"maximum number of files to inventory; defaults to 25000"`
 }
+type proposeDiscoveredArchitectureInput struct {
+	Path          string `json:"path" jsonschema:"repository directory inside CODEFLOW_DISCOVERY_ROOTS"`
+	BaseRevision  int64  `json:"baseRevision" jsonschema:"architecture revision returned by read_architecture"`
+	ParentID      string `json:"parentId,omitempty" jsonschema:"existing component that will contain the imported repository; defaults to the platform root"`
+	Author        string `json:"author,omitempty" jsonschema:"agent identity used for proposal attribution"`
+	MaxFiles      int    `json:"maxFiles,omitempty" jsonschema:"maximum files to inventory; defaults to 25000"`
+	MaxComponents int    `json:"maxComponents,omitempty" jsonschema:"maximum discovered components to include; defaults to 50 and caps at 200"`
+}
+type proposeDiscoveredArchitectureOutput struct {
+	ProposalID        string `json:"proposalId,omitempty"`
+	Status            string `json:"status"`
+	Revision          int64  `json:"revision"`
+	OperationCount    int    `json:"operationCount"`
+	ComponentCount    int    `json:"componentCount"`
+	RelationshipCount int    `json:"relationshipCount"`
+}
 
 func newMCPHandler(store *Store) http.Handler {
 	readServer := buildMCPServer(store, false)
@@ -57,7 +73,7 @@ func newMCPHandler(store *Store) http.Handler {
 }
 
 func buildMCPServer(store *Store, writable bool) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "codeflow", Version: "v0.2.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "codeflow", Version: "v0.3.0"}, nil)
 	server.AddResource(&mcp.Resource{
 		URI: graphResourceURI, Name: "codeflow-architecture-graph", Title: "CodeFlow architecture graph",
 		Description: "Canonical typed architecture graph, blocks, relationships, proposals, views, and current revision.", MIMEType: "application/json",
@@ -81,6 +97,14 @@ func buildMCPServer(store *Store, writable bool) *mcp.Server {
 			return nil, report, nil
 		})
 	if writable {
+		mcp.AddTool(server, &mcp.Tool{Name: "propose_discovered_architecture", Description: "Rescan a configured repository, translate its packages and verified dependencies into additive graph operations, and save them as a review-gated proposal. Repeated calls are idempotent and never modify source files or the authoritative graph directly."},
+			func(_ context.Context, _ *mcp.CallToolRequest, input proposeDiscoveredArchitectureInput) (*mcp.CallToolResult, proposeDiscoveredArchitectureOutput, error) {
+				result, err := proposeDiscoveredArchitecture(store, DiscoveryProposalRequest{Path: input.Path, BaseRevision: input.BaseRevision, ParentID: input.ParentID, Author: input.Author, MaxFiles: input.MaxFiles, MaxComponents: input.MaxComponents})
+				if err != nil {
+					return nil, proposeDiscoveredArchitectureOutput{}, err
+				}
+				return nil, proposeDiscoveredArchitectureOutput{ProposalID: result.ProposalID, Status: result.Status, Revision: result.Revision, OperationCount: result.OperationCount, ComponentCount: result.ComponentCount, RelationshipCount: result.RelationshipCount}, nil
+			})
 		mcp.AddTool(server, &mcp.Tool{Name: "propose_architecture_change", Description: "Validate and submit an attributed, revision-bound architecture change for human review. This never mutates the authoritative graph directly."},
 			func(_ context.Context, _ *mcp.CallToolRequest, input proposeArchitectureInput) (*mcp.CallToolResult, proposeArchitectureOutput, error) {
 				project, err := store.SaveProposal(Proposal{ID: input.ID, Title: input.Title, Summary: input.Summary, Author: fallback(input.Author, "MCP agent"), AuthorType: "agent", BaseRevision: input.BaseRevision, Operations: input.Operations})

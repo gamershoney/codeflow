@@ -107,7 +107,7 @@ export default function App(){
     <SearchPalette project={project} open={searchOpen} onClose={()=>setSearchOpen(false)} onSelect={selectComponent} onAdd={()=>setComponentDialogOpen(true)} onReview={()=>setProposalOpen(true)} onActivity={()=>setActivityOpen(true)} onDiscover={()=>setDiscoveryOpen(true)}/>
     <ShareDialog project={project} open={shareOpen} onClose={()=>setShareOpen(false)} onNotify={setToast}/>
     <SettingsDialog open={settingsOpen} value={preferences} onChange={updatePreferences} onClose={()=>setSettingsOpen(false)}/>
-    <RepositoryDiscoveryDialog open={discoveryOpen} onClose={()=>setDiscoveryOpen(false)}/>
+    <RepositoryDiscoveryDialog open={discoveryOpen} onClose={()=>setDiscoveryOpen(false)} baseRevision={project.revision} onProposed={result=>{setProject(result.project);setToast(result.status==='pending'?'Architecture proposal ready':'Repository architecture is already up to date')}} onReview={()=>setProposalOpen(true)}/>
     {toast&&<div className="toast">{toast}</div>}
   </div>
 }

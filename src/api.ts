@@ -1,4 +1,4 @@
-import type { DiscoveryReport, Operation, Presence, Project } from './types'
+import type { DiscoveryProposalResult, DiscoveryReport, Operation, Presence, Project } from './types'
 
 async function request<T>(path:string, options?:RequestInit):Promise<T> {
   const response = await fetch(path, { headers:{'Content-Type':'application/json'}, ...options })
@@ -13,4 +13,5 @@ export const api = {
   review: (id:string, decision:'accepted'|'rejected', comment:string) => request<Project>(`/api/proposals/${id}/review`, {method:'POST', body:JSON.stringify({reviewer:'You',decision,comment})}),
   presence: (presence:Omit<Presence,'lastSeen'>) => request<Presence[]>('/api/presence', {method:'POST',body:JSON.stringify(presence)}),
   discover: (path:string,maxFiles=25000) => request<DiscoveryReport>('/api/discovery', {method:'POST',body:JSON.stringify({path,maxFiles})}),
+  proposeDiscovery: (path:string,baseRevision:number,maxComponents=50) => request<DiscoveryProposalResult>('/api/discovery/proposals', {method:'POST',body:JSON.stringify({path,baseRevision,maxComponents,author:'You'})}),
 }

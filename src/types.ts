@@ -12,3 +12,4 @@ export type Presence = { sessionId:string; name:string; color:string; selection?
 export type DiscoveryComponent = { id:string;name:string;path:string;kind:string;language:string;fileCount:number;symbolCount:number;symbols?:string[] }
 export type DiscoveryDependency = { sourceId:string;targetId:string;kind:string;count:number;evidence:string[] }
 export type DiscoveryReport = { root:string;name:string;kind:string;generatedAt:string;totalFiles:number;sourceFiles:number;languages:Record<string,number>;frameworks:string[];manifests:string[];components:DiscoveryComponent[];dependencies:DiscoveryDependency[];warnings?:string[];truncated:boolean }
+export type DiscoveryProposalResult = { proposalId?:string;status:'pending'|'up_to_date';revision:number;operationCount:number;componentCount:number;relationshipCount:number;report:DiscoveryReport;project:Project }

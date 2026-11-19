@@ -35,6 +35,7 @@ Then open <http://localhost:8787>. Project state is stored in `data/project.json
 - Open two browser sessions. Graph changes arrive over server-sent events, and active selections appear as presence avatars.
 - Double-click a component containing children to enter its semantic scope; use breadcrumbs to zoom out.
 - Open **Discover repository** from the left rail to inspect a configured local codebase. Discovery is read-only and reports languages, frameworks, source components, symbols, and evidence-backed dependency edges.
+- After a scan, choose **Create chart proposal** to translate the evidence into an additive architecture proposal. Review the generated components and relationships before accepting them into the canonical graph.
 
 ## Repository discovery
 
@@ -51,6 +52,8 @@ $env:CODEFLOW_DISCOVERY_ROOTS = 'H:\ProjectsFolder'
 npm run dev
 ```
 
+Repository imports are additive and idempotent: rescanning an already accepted repository reports it as up to date, while newly discovered components and dependencies become another review-gated proposal. The bridge never deletes existing graph data automatically.
+
 Unreal C++ includes are discovered, but binary Blueprint and asset relationships require a future Unreal Asset Registry export. Godot scene resources, Go module imports, JavaScript/TypeScript relative imports, local C/C++ includes, and Odin packages/procedures/local imports are supported in the prototype.
 
 ## Agent bridge
@@ -61,6 +64,7 @@ The Go service uses the official `github.com/modelcontextprotocol/go-sdk` and ex
 - `tools/list`
 - `read_architecture`
 - `discover_repository` (read-only and restricted to `CODEFLOW_DISCOVERY_ROOTS`)
+- `propose_discovered_architecture` (rescans a scoped repository and creates an additive, review-gated chart proposal)
 - `propose_architecture_change`
 
 Proposed operations are validated against the canonical graph but are not applied until human review. Mutations and proposal acceptance use optimistic `baseRevision` checks.
@@ -73,7 +77,7 @@ $env:CODEFLOW_MCP_WRITE_TOKEN = '<random-write-token>'
 go run ./cmd/server
 ```
 
-Send the selected value as `Authorization: Bearer <token>`. The read token can discover the graph resource and call `read_architecture` or scoped `discover_repository`; only the write token can discover or call `propose_architecture_change`. Token comparisons are constant-time, and invalid or missing credentials receive `401 Unauthorized` once token mode is enabled.
+Send the selected value as `Authorization: Bearer <token>`. The read token can discover the graph resource and call `read_architecture` or scoped `discover_repository`; only the write token can create proposals with `propose_discovered_architecture` or `propose_architecture_change`. Token comparisons are constant-time, and invalid or missing credentials receive `401 Unauthorized` once token mode is enabled.
 
 ## Verification
 
@@ -81,6 +85,6 @@ Send the selected value as `Authorization: Bearer <token>`. The read token can d
 npm test
 ```
 
-This runs Go persistence/revision/proposal tests and a strict TypeScript production build. MCP integration tests connect the official SDK client to the HTTP server, discover tools/resources, read the graph, submit a review-gated proposal, and verify read/write token scopes.
+This runs Go persistence/revision/proposal tests and a strict TypeScript production build. MCP integration tests connect the official SDK client to the HTTP server, discover tools/resources, scan a temporary repository, generate and accept its chart proposal, verify an idempotent rescan, submit a manual review-gated proposal, and verify read/write token scopes.
 
 The graph test suite also covers atomic multi-operation creation, dangling-reference cleanup, and guarded deletion of parent components.

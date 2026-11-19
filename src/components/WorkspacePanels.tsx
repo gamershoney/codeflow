@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bell, Blocks, Box, Check, Copy, FolderSearch, GitBranch, History, Link2, LoaderCircle, Search, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
-import type { Component, DiscoveryReport, Project } from '../types'
+import type { Component, DiscoveryProposalResult, DiscoveryReport, Project } from '../types'
 
 type SearchAction={id:string;label:string;description:string;icon:typeof Box;run:()=>void}
 
@@ -29,13 +29,16 @@ export function SearchPalette({project,open,onClose,onSelect,onAdd,onReview,onAc
   </div>
 }
 
-export function RepositoryDiscoveryDialog({open,onClose}:{open:boolean;onClose:()=>void}){
+export function RepositoryDiscoveryDialog({open,onClose,baseRevision,onProposed,onReview}:{open:boolean;onClose:()=>void;baseRevision:number;onProposed:(result:DiscoveryProposalResult)=>void;onReview:()=>void}){
   const [path,setPath]=useState('')
   const [report,setReport]=useState<DiscoveryReport|null>(null)
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
+  const [proposing,setProposing]=useState(false)
+  const [proposal,setProposal]=useState<DiscoveryProposalResult|null>(null)
   if(!open)return null
-  const scan=async(event:React.FormEvent)=>{event.preventDefault();if(!path.trim())return;setBusy(true);setError('');setReport(null);try{setReport(await api.discover(path.trim()))}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  const scan=async(event:React.FormEvent)=>{event.preventDefault();if(!path.trim())return;setBusy(true);setError('');setReport(null);setProposal(null);try{setReport(await api.discover(path.trim()))}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  const propose=async()=>{setProposing(true);setError('');try{const result=await api.proposeDiscovery(path.trim(),baseRevision);setProposal(result);onProposed(result)}catch(reason){setError((reason as Error).message)}finally{setProposing(false)}}
   const componentById=(id:string)=>report?.components.find(item=>item.id===id)
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose()}}><div className="discovery-dialog">
     <div className="dialog-head"><div><span className="eyebrow">Repository intelligence</span><h2>Discover a local codebase</h2></div><button className="icon-button" onClick={onClose}><X size={16}/></button></div>
@@ -47,6 +50,7 @@ export function RepositoryDiscoveryDialog({open,onClose}:{open:boolean;onClose:(
       <div className="discovery-tags">{report.frameworks.map(item=><span key={item}>{item}</span>)}{Object.entries(report.languages).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([name,count])=><span key={name}>{name} · {count}</span>)}</div>
       {report.warnings?.map(warning=><div className="discovery-warning" key={warning}>{warning}</div>)}
       <div className="discovery-columns"><section><h4>Detected components</h4>{report.components.slice(0,40).map(item=><div className="discovery-row" key={item.id}><span><b>{item.name}</b><small>{item.path}</small></span><em>{item.language} · {item.fileCount}</em></div>)}</section><section><h4>Evidence-backed dependencies</h4>{report.dependencies.slice(0,40).map(item=><div className="discovery-row" key={`${item.sourceId}-${item.targetId}`}><span><b>{componentById(item.sourceId)?.name} → {componentById(item.targetId)?.name}</b><small>{item.evidence[0]}</small></span><em>{item.count} imports</em></div>)}</section></div>
+      <div className="discovery-actions">{proposal?.status==='pending'?<><span><Check size={14}/> Proposal ready with {proposal.operationCount} operations</span><button onClick={()=>{onClose();onReview()}}><Sparkles size={14}/> Review proposal</button></>:proposal?.status==='up_to_date'?<span><Check size={14}/> This repository is already represented in the graph</span>:<><span>Creates an additive, review-gated chart proposal.</span><button onClick={propose} disabled={proposing}>{proposing?<LoaderCircle className="spin" size={14}/>:<Sparkles size={14}/>} {proposing?'Preparing…':'Create chart proposal'}</button></>}</div>
     </div>}
   </div></div>
 }
