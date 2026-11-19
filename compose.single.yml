@@ -1,0 +1,26 @@
+services:
+  codeflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: codeflow:local
+    restart: unless-stopped
+    env_file:
+      - .env.container
+    ports:
+      - "80:8081"
+      - "443:8443"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - type: volume
+        source: codeflow_data
+        target: /data
+      - type: bind
+        source: ${CODEFLOW_REPOSITORY_ROOT:-./repositories}
+        target: /repos
+        read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  codeflow_data:

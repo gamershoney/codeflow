@@ -1,6 +1,11 @@
-node_modules/
-dist/
+.env
+.env.container
+data/
 data/project.json
+dist/
+node_modules/
+repositories/
+*.log
 *.tmp
 *.tsbuildinfo
 .DS_Store

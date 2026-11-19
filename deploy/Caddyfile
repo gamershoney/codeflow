@@ -1,0 +1,38 @@
+{
+	admin off
+	http_port 8081
+	https_port 8443
+	servers {
+		0rtt off
+	}
+}
+
+{$CODEFLOW_DOMAIN} {
+	encode zstd gzip
+
+	@mcp path /mcp /mcp/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
+	handle @mcp {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}
+
+{$POCKET_ID_DOMAIN} {
+	encode zstd gzip
+
+	@publicSetup {
+		path /setup /setup/* /api/signup/setup /api/signup/setup/*
+		not client_ip private_ranges
+	}
+	respond @publicSetup "Initial setup is available only from the local network" 403
+
+	reverse_proxy 127.0.0.1:1411
+}
+
+:8080 {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8787
+}

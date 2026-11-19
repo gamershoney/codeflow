@@ -96,6 +96,51 @@ Connect the client to `https://codeflow.example.com/mcp`. CodeFlow publishes RFC
 
 The default scopes are `codeflow:read` and `codeflow:write`; override them with `CODEFLOW_MCP_OAUTH_READ_SCOPE` and `CODEFLOW_MCP_OAUTH_WRITE_SCOPE` only when the identity provider uses different names. A write token must contain both scopes. Fixed local tokens can remain enabled alongside OAuth for trusted local automation.
 
+## One-container home deployment
+
+The single-container image bundles three maintained processes behind one entrypoint:
+
+- CodeFlow for the UI, graph API, and MCP server.
+- [Pocket ID](https://pocket-id.org/) for passkey authentication, OAuth/OIDC, CIMD client registration, JWT signing, and SQLite identity storage.
+- Caddy for automatic HTTPS and host-based routing.
+
+Only the MCP endpoint and OAuth metadata are public on the CodeFlow hostname. The unprotected browser workspace remains on loopback port `8080`, so its graph and repository APIs are not exposed to the internet.
+
+### 1. Prepare DNS and configuration
+
+Create two DNS records pointing at the home server, such as `codeflow.example.com` and `auth.example.com`, and forward TCP ports 80 and 443 to it. Then:
+
+```powershell
+Copy-Item .env.container.example .env.container
+```
+
+Edit `.env.container` with both hostnames, a stable random Pocket ID encryption key, and the host repository directory. The repository mount is read-only. Start the stack:
+
+```powershell
+docker compose --env-file .env.container -f compose.single.yml up -d --build
+```
+
+The named `codeflow_data` volume contains the CodeFlow graph, Pocket ID database and signing keys, and Caddy certificates. Back it up with the same care as the repositories.
+
+### 2. Bootstrap Pocket ID
+
+From the home network, open `https://<POCKET_ID_DOMAIN>/setup`, create the owner, and register a passkey. Caddy blocks this setup route from public IP addresses, and Pocket ID closes initial setup after the first account is created. If the public hostname does not resolve to the server's private address while at home, add a local DNS override for the setup step. There is no public CodeFlow signup flow.
+
+In Pocket ID:
+
+1. Under **Application Configuration → OIDC**, allow the exact metadata-document client URL `https://chatgpt.com/oauth/client.json`.
+2. Under **Administration → APIs**, create **CodeFlow** with resource `https://<CODEFLOW_DOMAIN>`.
+3. Add permissions `codeflow:read` and `codeflow:write`.
+4. Under that API's metadata-document client access, allow both permissions.
+
+Pocket ID then accepts ChatGPT's CIMD client, applies PKCE automatically, includes the CodeFlow resource as the access-token audience, and issues only the approved permissions.
+
+### 3. Connect ChatGPT
+
+Add a custom MCP server in ChatGPT using `https://<CODEFLOW_DOMAIN>/mcp`, select OAuth with CIMD registration, and complete the Pocket ID passkey flow. The local CodeFlow workspace remains available only at <http://localhost:8080> by default. To use it elsewhere on the LAN, deliberately bind port 8080 to the server's private LAN address and keep it blocked from the public internet.
+
+Container startup fails closed when hostnames or encryption material are missing. Pocket ID and CodeFlow listen only on container loopback; Caddy is the only public listener. Shutting down the container forwards termination to all three processes.
+
 ## Verification
 
 ```powershell
