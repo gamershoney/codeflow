@@ -51,7 +51,7 @@ $env:CODEFLOW_DISCOVERY_ROOTS = 'H:\ProjectsFolder'
 npm run dev
 ```
 
-Unreal C++ includes are discovered, but binary Blueprint and asset relationships require a future Unreal Asset Registry export. Godot scene resources, Go module imports, JavaScript/TypeScript relative imports, and local C/C++ includes are supported in the prototype.
+Unreal C++ includes are discovered, but binary Blueprint and asset relationships require a future Unreal Asset Registry export. Godot scene resources, Go module imports, JavaScript/TypeScript relative imports, local C/C++ includes, and Odin packages/procedures/local imports are supported in the prototype.
 
 ## Agent bridge
 

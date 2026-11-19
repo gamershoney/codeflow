@@ -18,22 +18,29 @@ func TestScanFindsMixedRepositoryArchitecture(t *testing.T) {
 	writeFixture(t, root, "game/project.godot", "[application]\nconfig/name=\"Fixture\"\n")
 	writeFixture(t, root, "game/scenes/main.tscn", "[gd_scene load_steps=2]\n[ext_resource path=\"res://scripts/player.gd\" type=\"Script\"]\n")
 	writeFixture(t, root, "game/scripts/player.gd", "class_name Player\n")
+	writeFixture(t, root, "ols.json", `{}`)
+	writeFixture(t, root, "odin/main.odin", "package main\nimport physics \"../physics\"\nmain :: proc() {}\nGame_State :: struct {}\n")
+	writeFixture(t, root, "physics/world.odin", "package physics\nWorld :: struct {}\nstep :: proc() {}\n")
 
 	report, err := Scan(root, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.SourceFiles != 6 {
-		t.Fatalf("source files = %d, want 6", report.SourceFiles)
+	if report.SourceFiles != 8 {
+		t.Fatalf("source files = %d, want 8", report.SourceFiles)
 	}
-	if report.Kind != "game" || !slices.Contains(report.Frameworks, "Godot") || !slices.Contains(report.Frameworks, "Go modules") || !slices.Contains(report.Frameworks, "Node.js") {
+	if report.Kind != "game" || !slices.Contains(report.Frameworks, "Godot") || !slices.Contains(report.Frameworks, "Go modules") || !slices.Contains(report.Frameworks, "Node.js") || !slices.Contains(report.Frameworks, "Odin") {
 		t.Fatalf("unexpected classification: kind=%s frameworks=%v", report.Kind, report.Frameworks)
 	}
 	if len(report.Components) < 5 {
 		t.Fatalf("components = %d, want at least 5", len(report.Components))
 	}
-	if len(report.Dependencies) < 2 {
-		t.Fatalf("dependencies = %d, want cross-component Go and Godot edges", len(report.Dependencies))
+	if len(report.Dependencies) < 3 {
+		t.Fatalf("dependencies = %d, want cross-component Go, Godot, and Odin edges", len(report.Dependencies))
+	}
+	odinComponent := slices.IndexFunc(report.Components, func(component Component) bool { return component.Language == "Odin" && component.Path == "odin" })
+	if odinComponent < 0 || report.Components[odinComponent].SymbolCount != 2 {
+		t.Fatalf("Odin symbols were not discovered: %#v", report.Components)
 	}
 }
 

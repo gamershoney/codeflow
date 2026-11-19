@@ -68,14 +68,17 @@ var (
 	quotedImport = regexp.MustCompile(`(?m)(?:from\s+|require\s*\(|import\s*)["']([^"']+)["']`)
 	includePath  = regexp.MustCompile(`(?m)^\s*#include\s*["<]([^">]+)[">]`)
 	goImport     = regexp.MustCompile(`(?m)(?:^\s*import\s+|^\s*)"([^"]+)"`)
+	odinImport   = regexp.MustCompile(`(?m)^\s*import(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s+"([^"]+)"`)
 	godotPath    = regexp.MustCompile(`path="res://([^"]+)"`)
 	symbolLine   = regexp.MustCompile(`(?m)^\s*(?:export\s+)?(?:async\s+)?(?:func|function|class|struct|interface|enum|type)\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	odinSymbol   = regexp.MustCompile(`(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*::\s*(?:proc|struct|enum|union|distinct|bit_set)\b`)
 )
 
 var sourceLanguages = map[string]string{
 	".go": "Go", ".js": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript", ".jsx": "JavaScript",
 	".ts": "TypeScript", ".tsx": "TypeScript", ".cpp": "C++", ".cc": "C++", ".c": "C", ".h": "C/C++ Header", ".hpp": "C/C++ Header",
 	".cs": "C#", ".gd": "GDScript", ".py": "Python", ".java": "Java", ".kt": "Kotlin", ".rs": "Rust", ".rb": "Ruby", ".php": "PHP",
+	".odin": "Odin",
 }
 
 var skippedDirectories = map[string]bool{
@@ -155,6 +158,9 @@ func Scan(root string, options Options) (Report, error) {
 		}
 		report.SourceFiles++
 		report.Languages[language]++
+		if language == "Odin" {
+			addUnique(&report.Frameworks, "Odin")
+		}
 		dir := cleanPath(filepath.Dir(rel))
 		build := components[dir]
 		if build == nil {
@@ -177,10 +183,10 @@ func Scan(root string, options Options) (Report, error) {
 			continue
 		}
 		build := components[file.dir]
-		for _, match := range symbolLine.FindAllStringSubmatch(string(data), 30) {
+		for _, symbol := range extractSymbols(file.language, string(data)) {
 			build.component.SymbolCount++
 			if len(build.component.Symbols) < 12 {
-				build.component.Symbols = append(build.component.Symbols, match[1])
+				build.component.Symbols = append(build.component.Symbols, symbol)
 			}
 		}
 	}
@@ -223,6 +229,10 @@ func discoverDependencies(files []sourceFile, components map[string]*componentBu
 			}
 		case "C", "C++", "C/C++ Header":
 			for _, match := range includePath.FindAllStringSubmatch(text, -1) {
+				imports = append(imports, match[1])
+			}
+		case "Odin":
+			for _, match := range odinImport.FindAllStringSubmatch(text, -1) {
 				imports = append(imports, match[1])
 			}
 		case "Godot Scene", "GDScript":
@@ -268,6 +278,12 @@ func resolveImport(file sourceFile, imported string, components map[string]*comp
 	if strings.HasPrefix(imported, ".") {
 		return nearestComponent(cleanPath(filepath.Join(file.dir, imported)), components)
 	}
+	if file.language == "Odin" {
+		if strings.Contains(imported, ":") {
+			return ""
+		}
+		return nearestComponent(cleanPath(filepath.Join(file.dir, imported)), components)
+	}
 	if target, ok := fileByBase[strings.ToLower(filepath.Base(imported))]; ok {
 		return target
 	}
@@ -307,6 +323,8 @@ func manifestFramework(name string) (string, bool) {
 		return "Python", true
 	case "composer.json":
 		return "PHP/Composer", true
+	case "ols.json":
+		return "Odin", true
 	}
 	if strings.HasSuffix(name, ".uproject") {
 		return "Unreal Engine", true
@@ -342,6 +360,19 @@ func readSmall(path string) ([]byte, error) {
 		return nil, errors.New("source file exceeds 2 MiB")
 	}
 	return os.ReadFile(path)
+}
+
+func extractSymbols(language, text string) []string {
+	pattern := symbolLine
+	if language == "Odin" {
+		pattern = odinSymbol
+	}
+	matches := pattern.FindAllStringSubmatch(text, 30)
+	result := make([]string, 0, len(matches))
+	for _, match := range matches {
+		result = append(result, match[1])
+	}
+	return result
 }
 
 func stableID(prefix, value string) string {
